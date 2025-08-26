@@ -1,6 +1,16 @@
 [package]
-name = "untitled"
+name = "rust_vst_synth"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug", features = ["standalone"] }
+nih_plug_vizia = { git = "https://github.com/robbert-vdh/nih-plug" }
+dasp = "0.11"
+
+[[bin]]
+name = "standalone"
+path = "src/bin/standalone.rs"
+
+[patch."https://github.com/RustAudio/baseview"]
+baseview = { path = "vendor/baseview" }
