@@ -46,7 +46,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             waveform: Waveform::SQUARE,
             detune_semitones: -12.0,
             volume: 0.5,
+        },
+        OscillatorConfig {
+            waveform: Waveform::RANDOM,   // Random oscillator for texture
+            detune_semitones: 19.0,      // One octave down
+            volume: 0.5,
         }
+
     ];
 
     let filter = Filter::new(filter_config, sample_rate);

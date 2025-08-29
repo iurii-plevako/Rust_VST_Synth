@@ -1,19 +1,34 @@
-// voice.rs
 use std::sync::{Arc, Mutex};
-
-use crate::oscillator::{Oscillator,OscillatorConfig};
+use crate::oscillator::{OscillatorConfig, WaveformGenerator, BasicOscillator, RandomOscillator};
 use crate::envelope::Envelope;
-use crate::filter::{Filter, FilterParameters};
+use crate::filter::Filter;
+use crate::voice_configuration::Waveform;
 
-#[derive(Clone)]
 pub struct Voice {
-    oscillators: Vec<Oscillator>,
+    oscillators: Vec<Box<dyn WaveformGenerator>>,
     envelope: Arc<Mutex<Envelope>>,
     filter: Filter,
     filter_envelope: Arc<Mutex<Envelope>>,
     frequency: f64,
     is_note_on: bool,
     sample_rate: f64,
+}
+
+// Manual Clone implementation for Voice
+impl Clone for Voice {
+    fn clone(&self) -> Self {
+        Voice {
+            oscillators: self.oscillators.iter()
+                .map(|osc| osc.box_clone())
+                .collect(),
+            envelope: self.envelope.clone(),
+            filter: self.filter.clone(),
+            filter_envelope: self.filter_envelope.clone(),
+            frequency: self.frequency,
+            is_note_on: self.is_note_on,
+            sample_rate: self.sample_rate,
+        }
+    }
 }
 
 impl Voice {
@@ -27,7 +42,10 @@ impl Voice {
         filter_envelope: Arc<Mutex<Envelope>>,
     ) -> Self {
         let oscillators = oscillator_configs.into_iter()
-            .map(|config| Oscillator::new(sample_rate, base_frequency, config))
+            .map(|config| match config.waveform {
+                Waveform::RANDOM => Box::new(RandomOscillator::new(sample_rate, base_frequency, config)) as Box<dyn WaveformGenerator>,
+                _ => Box::new(BasicOscillator::new(sample_rate, base_frequency, config)) as Box<dyn WaveformGenerator>,
+            })
             .collect();
 
         // Add the filter envelope as a modulation source
