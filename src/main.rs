@@ -9,8 +9,8 @@ use rust_vst_synth::voice_configuration::Waveform;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create the envelope configuration
     let envelope = Envelope::new(
-        0.5,     // attack time in seconds
-        0.5,     // decay time
+        1.5,     // attack time in seconds
+        1.0,     // decay time
         0.6,     // sustain level (amplitude)
         2.0,     // release time
         44100.0  // initial sample rate
@@ -52,15 +52,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Play a test note (A4 = 440 Hz)
     println!("Playing test note...");
     synth.note_on(110.0);
+
+    // sleep(Duration::from_millis(500));
+
+    // synth.note_on(165.0);
+
+    // sleep(Duration::from_millis(500));
+
+    // synth.note_on(220.0);
     
     // Keep the note playing for 2 seconds
-    sleep(Duration::from_millis(500));
+    sleep(Duration::from_secs(5));
     
     // Release the note
     synth.note_off(110.0);
     
     // Wait for release to complete
-    sleep(Duration::from_secs(10));
+    sleep(Duration::from_secs(20));
 
     // Keep the program running
     println!("Press Ctrl+C to exit...");

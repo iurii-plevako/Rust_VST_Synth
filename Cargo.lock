@@ -441,6 +441,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62af46d040ba9df09edc6528dae9d8e49f5f3e82f55b7d2ec31a733c38dbc49d"
 
 [[package]]
+name = "atomic_float"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "628d228f918ac3b82fe590352cc719d30664a0c13ca3a60266fe02c7132d480a"
+
+[[package]]
 name = "atomic_refcell"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2280,7 +2286,7 @@ source = "git+https://github.com/robbert-vdh/nih-plug#ecfd6322c776d9f0373d317589
 dependencies = [
  "anyhow",
  "anymap3",
- "atomic_float",
+ "atomic_float 0.1.0",
  "atomic_refcell",
  "backtrace",
  "baseview",
@@ -3038,11 +3044,11 @@ dependencies = [
 name = "rust_vst_synth"
 version = "0.1.0"
 dependencies = [
+ "atomic_float 1.1.0",
  "cpal",
  "dasp",
  "nih_plug",
  "nih_plug_vizia",
- "parking_lot",
 ]
 
 [[package]]

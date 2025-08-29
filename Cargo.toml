@@ -8,7 +8,7 @@ nih_plug = { git = "https://github.com/robbert-vdh/nih-plug", features = ["stand
 nih_plug_vizia = { git = "https://github.com/robbert-vdh/nih-plug" }
 dasp = { version = "0.11", features = ["signal"] }
 cpal = "0.15.2"
-parking_lot = "0.12"
+atomic_float = "1.1.0"
 
 [[bin]]
 name = "standalone"

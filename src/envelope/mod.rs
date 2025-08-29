@@ -1,3 +1,7 @@
+use std::sync::{atomic::Ordering, Arc};
+use std::time::Instant;
+use atomic_float::AtomicF64;
+
 use cpal::traits::{DeviceTrait, HostTrait};
 
 #[derive(Clone)]
@@ -6,11 +10,14 @@ pub struct Envelope {
     pub decay_time: f64,
     pub sustain_level: f64,
     pub release_time: f64,
-    current_value: f64,
+    current_value: Arc<AtomicF64>,
     current_state: EnvelopeState,
-    target_value: f64,
     rate: f64,
     sample_rate: f64,
+    release_start: Option<Instant>,
+    attack_start: Option<Instant>,
+    decay_start: Option<Instant>,
+    sample_count: Option<u32>,
 }
 
 impl Envelope {
@@ -20,94 +27,139 @@ impl Envelope {
             decay_time,
             sustain_level,
             release_time,
-            current_value: 0.0,
+            current_value: Arc::new(AtomicF64::new(0.0)),
             current_state: EnvelopeState::Idle,
-            target_value: 0.0,
             rate: 0.0,
             sample_rate,
+            release_start: None,
+            attack_start: None,
+            decay_start: None,
+            sample_count: None,
         }
     }
 
     pub fn update_sample_rate(&mut self, new_sample_rate: f64) {
-        // Store the new sample rate
         self.sample_rate = new_sample_rate;
 
-        // Recalculate the current rate based on the current state
         match self.current_state {
             EnvelopeState::Attack => {
-                self.rate = 1.0 / (self.attack_time * new_sample_rate);
+                let samples_for_attack = self.attack_time * new_sample_rate;
+                self.rate = (1.0 - self.current_value.load(Ordering::Relaxed)) / samples_for_attack;
             }
             EnvelopeState::Decay => {
-                self.rate = (1.0 - self.sustain_level) / (self.decay_time * new_sample_rate);
+                let samples_for_decay = self.decay_time * new_sample_rate;
+                self.rate = (self.sustain_level - self.current_value.load(Ordering::Relaxed)) / samples_for_decay;
             }
             EnvelopeState::Release => {
-                self.rate = self.current_value / (self.release_time * new_sample_rate);
+                let samples_for_release = self.release_time * new_sample_rate;
+                self.rate = -self.current_value.load(Ordering::Relaxed) / samples_for_release;
             }
             _ => {}
         }
+
     }
 
     pub fn is_active(&self) -> bool {
         // Envelope is active until it fully completes the release phase
         match self.current_state {
             EnvelopeState::Idle => false,
-            EnvelopeState::Release => self.current_value > 0.00001, // Consider envelope done when nearly silent
+            EnvelopeState::Release => self.current_value.load(Ordering::Relaxed) > 0.00001, // Consider envelope done when nearly silent
             _ => true
         }
     }
 
     pub fn trigger(&mut self) {
+        self.sample_count = Option::Some(0);
         self.current_state = EnvelopeState::Attack;
-        self.target_value = 1.0;
-        self.rate = 1.0 / (self.attack_time * self.sample_rate);
+        let samples_for_attack = (self.attack_time * self.sample_rate).ceil() as u32;
+        self.current_value = Arc::new(AtomicF64::new(0.000));
+
+        // Calculate rate to reach 1.0 over exact number of samples
+        self.rate = (1.0 - self.current_value.load(Ordering::Relaxed)) / samples_for_attack as f64;
+
+        self.attack_start = Some(Instant::now());
+        println!("Attack started:");
+        println!("- Initial value: {}", self.current_value.load(Ordering::Relaxed));
+        println!("- Samples to process: {}", samples_for_attack);
+        println!("- Rate (increase per sample): {}", self.rate);
     }
 
     pub fn release(&mut self) {
         if self.current_state != EnvelopeState::Idle {
             self.current_state = EnvelopeState::Release;
-            self.target_value = 0.0;
-            let old_rate = self.rate;
-            self.rate = self.current_value / (self.release_time * self.sample_rate);
-            println!("Release triggered:");
-            println!("- Current value: {}", self.current_value);
-            println!("- Sample rate: {}", self.sample_rate);
-            println!("- Release time: {}", self.release_time);
-            println!("- Calculated rate: {}", self.rate);
-            println!("- Samples to process: {}", self.release_time * self.sample_rate);
+            let samples_for_release = (self.release_time * self.sample_rate).ceil() as u32;
 
+            // Calculate rate to reach 0.0 over exact number of samples
+            self.rate = -self.current_value.load(Ordering::Relaxed) / samples_for_release as f64;
+
+            self.release_start = Some(Instant::now());
+            println!("Release started:");
+            println!("- From value: {}", self.current_value.load(Ordering::Relaxed));
+            println!("- Samples to process: {}", samples_for_release);
+            println!("- Rate (change per sample): {}", self.rate);
         }
     }
+
 
 
     pub fn next_value(&mut self) -> f64 {
         match self.current_state {
             EnvelopeState::Idle => 0.0,
             EnvelopeState::Attack => {
-                self.current_value += self.rate;
-                if self.current_value >= 1.0 {
-                    self.current_value = 1.0;
-                    self.current_state = EnvelopeState::Decay;
-                    self.target_value = self.sustain_level;
-                    self.rate = (1.0 - self.sustain_level) / (self.decay_time * self.sample_rate);
+                let new_value = (self.current_value.load(Ordering::Relaxed) + self.rate)
+                    .clamp(0.0, 1.0);  // Clamp to valid range
+                self.current_value.store(new_value, Ordering::Relaxed);
+
+                if let Some(count) = self.sample_count.as_mut() {
+                    *count += 1;
                 }
-                self.current_value
+
+                // Transition based on value, not time
+                if new_value >= 1.0 {
+                    println!("Attack completed after {} samples", self.sample_count.unwrap());
+                    self.attack_start = None;
+                    self.current_state = EnvelopeState::Decay;
+
+                    let samples_for_decay = (self.decay_time * self.sample_rate).ceil() as u32;
+                    self.rate = (self.sustain_level - new_value) / samples_for_decay as f64;
+                    self.decay_start = Some(Instant::now());
+
+                    println!("Decay started:");
+                    println!("- From value: {}", new_value);
+                    println!("- Target sustain: {}", self.sustain_level);
+                    println!("- Samples to process: {}", samples_for_decay);
+                    println!("- Rate (change per sample): {}", self.rate);
+                }
+                new_value
             }
             EnvelopeState::Decay => {
-                self.current_value -= self.rate;
-                if self.current_value <= self.sustain_level {
-                    self.current_value = self.sustain_level;
+                let new_value = (self.current_value.load(Ordering::Relaxed) + self.rate)
+                    .clamp(self.sustain_level, 1.0);
+                self.current_value.store(new_value, Ordering::Relaxed);
+
+                // Transition based on value
+                if new_value <= self.sustain_level {
+                    println!("Decay completed");
+                    self.decay_start = None;
                     self.current_state = EnvelopeState::Sustain;
+                    println!("Sustain reached at level: {}", new_value);
                 }
-                self.current_value
+                new_value
             }
             EnvelopeState::Sustain => self.sustain_level,
             EnvelopeState::Release => {
-                self.current_value -= self.rate;
-                if self.current_value <= 0.00001 {
-                    self.current_value = 0.0;
+                let new_value = (self.current_value.load(Ordering::Relaxed) + self.rate)
+                    .clamp(0.0, 1.0);  // Allow going down to silence
+                self.current_value.store(new_value, Ordering::Relaxed);
+
+                // Transition based on value
+                if new_value <= 0.001 {  // Small threshold for silence
+                    println!("Release completed at value {:.4}", new_value);
+                    self.release_start = None;
                     self.current_state = EnvelopeState::Idle;
+                    self.current_value.store(0.0, Ordering::Relaxed);
                 }
-                self.current_value
+                new_value
             }
         }
     }
