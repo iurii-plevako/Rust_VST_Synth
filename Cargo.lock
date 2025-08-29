@@ -3042,6 +3042,7 @@ dependencies = [
  "dasp",
  "nih_plug",
  "nih_plug_vizia",
+ "parking_lot",
 ]
 
 [[package]]

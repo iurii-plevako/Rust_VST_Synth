@@ -1,7 +1,10 @@
-mod envelope;
-pub mod sound_module;
+pub mod voice_configuration;
+pub mod envelope;
+pub mod oscillator;
+pub mod synthesizer;
 
-use dasp::{signal, Signal, Sample};
+mod voice;
+
 use nih_plug::prelude::*;
 use std::sync::Arc;
 use nih_plug_vizia::ViziaState;
@@ -9,8 +12,6 @@ use nih_plug_vizia::ViziaTheming;
 use nih_plug_vizia::widgets::*;
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::widgets::ParamSlider;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use std::time::Duration;
 
 pub struct MySynth {
     params: Arc<MyParams>,
