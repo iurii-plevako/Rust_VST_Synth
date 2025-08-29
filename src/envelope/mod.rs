@@ -1,8 +1,7 @@
 use std::sync::{atomic::Ordering, Arc};
 use std::time::Instant;
 use atomic_float::AtomicF64;
-
-use cpal::traits::{DeviceTrait, HostTrait};
+use crate::filter::ModulationSource;
 
 #[derive(Clone)]
 pub struct Envelope {
@@ -172,4 +171,18 @@ enum EnvelopeState {
     Decay,
     Sustain,
     Release,
+}
+
+impl ModulationSource for Envelope {
+    fn next_value(&mut self) -> f64 {
+        self.next_value()  // reuse existing next_value method
+    }
+
+    fn is_active(&self) -> bool {
+        self.is_active()   // reuse existing is_active method
+    }
+
+    fn reset(&mut self) {
+        self.trigger();    // reuse trigger as reset
+    }
 }

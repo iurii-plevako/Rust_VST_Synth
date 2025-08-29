@@ -2,22 +2,32 @@ use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::Duration;
 use rust_vst_synth::envelope::Envelope;
+use rust_vst_synth::filter::{Filter, FilterParameters, FilterSlope, FilterType};
 use rust_vst_synth::oscillator::OscillatorConfig;
 use rust_vst_synth::synthesizer::{Synthesizer, SynthesizerConfig};
 use rust_vst_synth::voice_configuration::Waveform;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let sample_rate = 44100.0;
     // Create the envelope configuration
     let envelope = Envelope::new(
         1.5,     // attack time in seconds
         1.0,     // decay time
         0.6,     // sustain level (amplitude)
         2.0,     // release time
-        44100.0  // initial sample rate
+        sample_rate  // initial sample rate
     );
 
     // Wrap it in Arc<Mutex>
     let envelope = Arc::new(Mutex::new(envelope));
+
+    let filter_config = FilterParameters {
+        filter_type: FilterType::LowPass,
+        slope: FilterSlope::Slope24dB,
+        cutoff: 500.0,  // 2kHz initial cutoff
+        resonance: 0.8,  // Moderate resonance
+    };
+
 
     // Create oscillator configurations
     let oscillator_configs = vec![
@@ -38,10 +48,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     ];
 
+    let filter = Filter::new(filter_config, sample_rate);
+
     // Create synthesizer configuration
     let config = SynthesizerConfig {
         oscillator_configs,
-        envelope,
+        envelope: envelope.clone(),
+        filter,
+        filter_envelope: envelope.clone(),
         max_voices: 16,
     };
 
@@ -62,7 +76,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // synth.note_on(220.0);
     
     // Keep the note playing for 2 seconds
-    sleep(Duration::from_secs(5));
+    sleep(Duration::from_secs(2));
     
     // Release the note
     synth.note_off(110.0);

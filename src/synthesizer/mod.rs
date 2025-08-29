@@ -1,6 +1,7 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::sync::{Arc, Mutex};
 use crate::envelope::Envelope;
+use crate::filter::{Filter, FilterParameters};
 use crate::oscillator::OscillatorConfig;
 use crate::voice::Voice;
 
@@ -95,6 +96,8 @@ impl Synthesizer {
                 self.config.oscillator_configs.clone(),
                 self.config.envelope.clone(),
                 frequency,
+                self.config.filter.clone(),
+                self.config.filter_envelope.clone(),
             );
             voice.trigger_note(frequency);
             state.voices.push(voice);
@@ -113,5 +116,7 @@ impl Synthesizer {
 pub struct SynthesizerConfig {
     pub oscillator_configs: Vec<OscillatorConfig>,
     pub envelope: Arc<Mutex<Envelope>>,
+    pub filter: Filter,
+    pub filter_envelope: Arc<Mutex<Envelope>>,
     pub max_voices: usize,
 }

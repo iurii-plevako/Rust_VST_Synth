@@ -2,6 +2,7 @@ pub mod voice_configuration;
 pub mod envelope;
 pub mod oscillator;
 pub mod synthesizer;
+pub mod filter;
 
 mod voice;
 
