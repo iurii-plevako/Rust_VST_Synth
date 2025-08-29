@@ -1,2 +1,2 @@
 cargo build
-target/debug/standalFone --period-size 512 --sample-rate 44100
+target/debug/standalone --period-size 512 --sample-rate 44100
