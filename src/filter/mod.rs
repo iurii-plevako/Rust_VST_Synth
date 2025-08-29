@@ -20,6 +20,7 @@ pub struct FilterParameters {
     pub slope: FilterSlope,
     pub cutoff: f64,      // Hz
     pub resonance: f64,   // 0.0 to 1.0
+    pub mod_amount: f64,
 }
 
 // Trait for any modulation source (envelope, LFO, etc.)
@@ -87,7 +88,9 @@ impl Filter {
             if let Ok(mut source) = source.lock() {
                 if source.is_active() {
                     let mod_value = source.next_value();
-                    modulated_cutoff *= 2.0f64.powf(mod_value * 10.0);
+                    // Scale the modulation effect by mod_amount
+                    let scaled_mod = mod_value * self.parameters.mod_amount;
+                    modulated_cutoff *= 2.0f64.powf(scaled_mod * 10.0);
                 }
             }
         }

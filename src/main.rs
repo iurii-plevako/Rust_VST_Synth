@@ -26,6 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         slope: FilterSlope::Slope24dB,
         cutoff: 500.0,  // 2kHz initial cutoff
         resonance: 0.8,  // Moderate resonance
+        mod_amount: 0.6,
     };
 
 
