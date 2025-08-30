@@ -24,9 +24,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let filter_config = FilterParameters {
         filter_type: FilterType::LowPass,
         slope: FilterSlope::Slope24dB,
-        cutoff: 500.0,  // 2kHz initial cutoff
-        resonance: 0.8,  // Moderate resonance
-        mod_amount: 0.6,
+        cutoff_frequency: 500.0,  // 2kHz initial cutoff
+        resonance_amount: 0.8,  // Moderate resonance
+        modulation_amount: 0.6,
     };
 
 

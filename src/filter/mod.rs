@@ -1,4 +1,3 @@
-// src/filter/mod.rs
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -18,12 +17,11 @@ pub enum FilterSlope {
 pub struct FilterParameters {
     pub filter_type: FilterType,
     pub slope: FilterSlope,
-    pub cutoff: f64,      // Hz
-    pub resonance: f64,   // 0.0 to 1.0
-    pub mod_amount: f64,
+    pub cutoff_frequency: f64,      // Hz
+    pub resonance_amount: f64,      // 0.0 to 1.0
+    pub modulation_amount: f64,     // Amount of modulation applied
 }
 
-// Trait for any modulation source (envelope, LFO, etc.)
 pub trait ModulationSource: Send + Sync {
     fn next_value(&mut self) -> f64;  // Returns value between 0.0 and 1.0
     fn is_active(&self) -> bool;
@@ -35,33 +33,31 @@ pub struct Filter {
     parameters: FilterParameters,
     sample_rate: f64,
     modulation_sources: Vec<Arc<Mutex<dyn ModulationSource>>>,
-    
-    // State variables for each filter stage
-    stages: Vec<FilterStage>,
+    filter_stages: Vec<FilterStage>,
 }
 
 #[derive(Clone)]
 struct FilterStage {
-    x1: f64,  // Previous input
-    x2: f64,  // Second previous input
-    y1: f64,  // Previous output
-    y2: f64,  // Second previous output
+    prev_input: f64,         // Previous input sample
+    prev_prev_input: f64,    // Second previous input sample
+    prev_output: f64,        // Previous output sample
+    prev_prev_output: f64,   // Second previous output sample
 }
 
 impl FilterStage {
     fn new() -> Self {
         Self {
-            x1: 0.0,
-            x2: 0.0,
-            y1: 0.0,
-            y2: 0.0,
+            prev_input: 0.0,
+            prev_prev_input: 0.0,
+            prev_output: 0.0,
+            prev_prev_output: 0.0,
         }
     }
 }
 
 impl Filter {
     pub fn new(parameters: FilterParameters, sample_rate: f64) -> Self {
-        let num_stages = match parameters.slope {
+        let stages_count = match parameters.slope {
             FilterSlope::Slope6dB => 1,
             FilterSlope::Slope12dB => 2,
             FilterSlope::Slope24dB => 4,
@@ -71,7 +67,7 @@ impl Filter {
             parameters,
             sample_rate,
             modulation_sources: Vec::new(),
-            stages: (0..num_stages).map(|_| FilterStage::new()).collect(),
+            filter_stages: (0..stages_count).map(|_| FilterStage::new()).collect(),
         }
     }
 
@@ -79,59 +75,81 @@ impl Filter {
         self.modulation_sources.push(source);
     }
 
-    pub fn process_sample(&mut self, input: f64) -> f64 {
+    pub fn process_sample(&mut self, input_sample: f64) -> f64 {
         // Calculate modulated cutoff frequency
-        let mut modulated_cutoff = self.parameters.cutoff;
+        let mut modulated_freq = self.parameters.cutoff_frequency;
         
         // Apply all modulation sources
         for source in &mut self.modulation_sources {
             if let Ok(mut source) = source.lock() {
                 if source.is_active() {
                     let mod_value = source.next_value();
-                    // Scale the modulation effect by mod_amount
-                    let scaled_mod = mod_value * self.parameters.mod_amount;
-                    modulated_cutoff *= 2.0f64.powf(scaled_mod * 10.0);
+                    let scaled_modulation = mod_value * self.parameters.modulation_amount;
+                    // Exponential frequency modulation
+                    modulated_freq *= 2.0f64.powf(scaled_modulation * 10.0);
                 }
             }
         }
 
-        modulated_cutoff = modulated_cutoff.clamp(20.0, self.sample_rate * 0.49);
-        let (a1, a2, b0, b1, b2) = self.calculate_coefficients(modulated_cutoff);
+        // Clamp frequency between 20Hz and Nyquist
+        let clamped_freq = modulated_freq.clamp(20.0, self.sample_rate * 0.49);
+        let (feedback1, feedback2, feed0, feed1, feed2) = 
+            self.calculate_coefficients(clamped_freq);
 
         // Process through all stages in series
-        let mut output = input;
-        for stage in &mut self.stages {
-            output = process_filter_stage(stage, output, a1, a2, b0, b1, b2);
+        let mut processed_sample = input_sample;
+        for stage in &mut self.filter_stages {
+            processed_sample = process_filter_stage(
+                stage, 
+                processed_sample, 
+                feedback1, 
+                feedback2, 
+                feed0, 
+                feed1, 
+                feed2
+            );
         }
 
-        output
+        processed_sample
     }
 
-    fn calculate_coefficients(&self, cutoff: f64) -> (f64, f64, f64, f64, f64) {
-        let w0 = 2.0 * std::f64::consts::PI * cutoff / self.sample_rate;
-        let cos_w0 = w0.cos();
-        let alpha = w0.sin() / (2.0 * self.parameters.resonance);
+    fn calculate_coefficients(&self, cutoff_freq: f64) -> (f64, f64, f64, f64, f64) {
+        let angular_freq = 2.0 * std::f64::consts::PI * cutoff_freq / self.sample_rate;
+        let cosine = angular_freq.cos();
+        let resonance_factor = angular_freq.sin() / (2.0 * self.parameters.resonance_amount);
 
         match self.parameters.filter_type {
             FilterType::LowPass => {
-                let b0 = (1.0 - cos_w0) / 2.0;
-                let b1 = 1.0 - cos_w0;
-                let b2 = (1.0 - cos_w0) / 2.0;
-                let a0 = 1.0 + alpha;
-                let a1 = -2.0 * cos_w0;
-                let a2 = 1.0 - alpha;
+                let feedforward0 = (1.0 - cosine) / 2.0;
+                let feedforward1 = 1.0 - cosine;
+                let feedforward2 = (1.0 - cosine) / 2.0;
+                let feedback0 = 1.0 + resonance_factor;
+                let feedback1 = -2.0 * cosine;
+                let feedback2 = 1.0 - resonance_factor;
 
-                (a1/a0, a2/a0, b0/a0, b1/a0, b2/a0)
+                (
+                    feedback1/feedback0, 
+                    feedback2/feedback0, 
+                    feedforward0/feedback0, 
+                    feedforward1/feedback0, 
+                    feedforward2/feedback0
+                )
             },
             FilterType::HighPass => {
-                let b0 = (1.0 + cos_w0) / 2.0;
-                let b1 = -(1.0 + cos_w0);
-                let b2 = (1.0 + cos_w0) / 2.0;
-                let a0 = 1.0 + alpha;
-                let a1 = -2.0 * cos_w0;
-                let a2 = 1.0 - alpha;
+                let feedforward0 = (1.0 + cosine) / 2.0;
+                let feedforward1 = -(1.0 + cosine);
+                let feedforward2 = (1.0 + cosine) / 2.0;
+                let feedback0 = 1.0 + resonance_factor;
+                let feedback1 = -2.0 * cosine;
+                let feedback2 = 1.0 - resonance_factor;
 
-                (a1/a0, a2/a0, b0/a0, b1/a0, b2/a0)
+                (
+                    feedback1/feedback0, 
+                    feedback2/feedback0, 
+                    feedforward0/feedback0, 
+                    feedforward1/feedback0, 
+                    feedforward2/feedback0
+                )
             }
         }
     }
@@ -141,15 +159,26 @@ impl Filter {
     }
 }
 
-fn process_filter_stage(stage: &mut FilterStage, input: f64, a1: f64, a2: f64, b0: f64, b1: f64, b2: f64) -> f64 {
-    let output = b0 * input + b1 * stage.x1 + b2 * stage.x2
-        - a1 * stage.y1 - a2 * stage.y2;
+fn process_filter_stage(
+    stage: &mut FilterStage, 
+    input_sample: f64, 
+    feedback1: f64, 
+    feedback2: f64, 
+    feed0: f64, 
+    feed1: f64, 
+    feed2: f64
+) -> f64 {
+    let output = feed0 * input_sample + 
+                feed1 * stage.prev_input + 
+                feed2 * stage.prev_prev_input -
+                feedback1 * stage.prev_output - 
+                feedback2 * stage.prev_prev_output;
 
     // Update state
-    stage.x2 = stage.x1;
-    stage.x1 = input;
-    stage.y2 = stage.y1;
-    stage.y1 = output;
+    stage.prev_prev_input = stage.prev_input;
+    stage.prev_input = input_sample;
+    stage.prev_prev_output = stage.prev_output;
+    stage.prev_output = output;
 
     output
 }
