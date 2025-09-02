@@ -1,20 +1,19 @@
 use super::{OscillatorConfig, WaveformGenerator};
-use std::f64::consts::PI;
-use crate::voice_configuration::Waveform;
+use std::f32::consts::PI;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone)]
 pub struct RandomOscillator {
     config: OscillatorConfig,
-    sample_rate: f64,
-    frequency: f64,
-    phase: f64,
-    wavetable: Vec<f64>,
+    sample_rate: f32,
+    frequency: f32,
+    phase: f32,
+    wavetable: Vec<f32>,
     wavetable_size: usize,
 }
 
 impl RandomOscillator {
-    pub fn new(sample_rate: f64, base_frequency: f64, config: OscillatorConfig) -> Self {
+    pub fn new(sample_rate: f32, base_frequency: f32, config: OscillatorConfig) -> Self {
         const WAVETABLE_SIZE: usize = 4096; // Increased size for more detail
         let mut wavetable = Vec::with_capacity(WAVETABLE_SIZE);
         
@@ -29,24 +28,24 @@ impl RandomOscillator {
         let mut random = move || {
             rng = rng.wrapping_mul(6364136223846793005)
                 .wrapping_add(1442695040888963407);
-            ((rng >> 32) as f64) / ((u32::MAX as f64) + 1.0)
+            ((rng >> 32) as f32) / ((u32::MAX as f32) + 1.0)
         };
 
         // Generate base harmonics with random phases and amplitudes
         let num_harmonics = 12;
-        let mut harmonic_phases: Vec<f64> = (0..num_harmonics)
+        let mut harmonic_phases: Vec<f32> = (0..num_harmonics)
             .map(|_| random() * 2.0 * PI)
             .collect();
-        let mut harmonic_amps: Vec<f64> = (0..num_harmonics)
+        let mut harmonic_amps: Vec<f32> = (0..num_harmonics)
             .map(|i| {
-                let base_amp = 1.0 / (i as f64 + 1.0).powf(0.7); // Less steep falloff
+                let base_amp = 1.0 / (i as f32 + 1.0).powf(0.7); // Less steep falloff
                 base_amp * (0.5 + 0.5 * random()) // Random amplitude variation
             })
             .collect();
 
         // Generate the wavetable
         for i in 0..WAVETABLE_SIZE {
-            let phase = (i as f64 / WAVETABLE_SIZE as f64) * 2.0 * PI;
+            let phase = (i as f32 / WAVETABLE_SIZE as f32) * 2.0 * PI;
             let mut sample = 0.0;
 
             // Add harmonics with random phase and amplitude modulation
@@ -58,12 +57,12 @@ impl RandomOscillator {
                 // Add some random wobble to the amplitude
                 amplitude *= 1.0 + 0.1 * (phase * 4.37 + harmonic_phase).sin();
 
-                sample += amplitude * (phase * harmonic as f64 + harmonic_phase).sin();
+                sample += amplitude * (phase * harmonic as f32 + harmonic_phase).sin();
 
                 // Add some frequency modulation for more character
                 if h < 3 {  // Only for first few harmonics
                     sample += 0.1 * amplitude * 
-                        (phase * harmonic as f64 * (1.0 + 0.02 * (phase * 3.17).sin())).sin();
+                        (phase * harmonic as f32 * (1.0 + 0.02 * (phase * 3.17).sin())).sin();
                 }
             }
 
@@ -86,7 +85,7 @@ impl RandomOscillator {
         }
 
         // Normalize
-        let max_amplitude = smoothed.iter().map(|x| x.abs()).fold(0.0, f64::max);
+        let max_amplitude = smoothed.iter().map(|x| x.abs()).fold(0.0, f32::max);
         for sample in &mut smoothed {
             *sample /= max_amplitude;
         }
@@ -94,7 +93,7 @@ impl RandomOscillator {
         Self {
             config,
             sample_rate,
-            frequency: base_frequency * (2.0f64.powf(config.detune_semitones / 12.0)),
+            frequency: base_frequency * (2.0f32.powf(config.detune_semitones / 12.0)),
             phase: 0.0,
             wavetable: smoothed,
             wavetable_size: WAVETABLE_SIZE,
@@ -103,9 +102,9 @@ impl RandomOscillator {
 }
 
 impl WaveformGenerator for RandomOscillator {
-    fn next_sample(&mut self) -> f64 {
+    fn next_sample(&mut self) -> f32 {
         // Cubic interpolation for smoother playback
-        let index_f = self.phase * self.wavetable_size as f64;
+        let index_f = self.phase * self.wavetable_size as f32;
         let index = index_f as usize % self.wavetable_size;
         let frac = index_f - index_f.floor();
         
@@ -125,11 +124,11 @@ impl WaveformGenerator for RandomOscillator {
         interpolated * self.config.volume
     }
 
-    fn update_sample_rate(&mut self, new_sample_rate: f64) {
+    fn update_sample_rate(&mut self, new_sample_rate: f32) {
         self.sample_rate = new_sample_rate;
     }
 
-    fn volume(&self) -> f64 {
+    fn volume(&self) -> f32 {
         self.config.volume
     }
 

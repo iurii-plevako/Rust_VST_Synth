@@ -1,68 +1,61 @@
 use std::sync::{Arc, Mutex};
-use std::thread::sleep;
-use std::time::Duration;
+use std::error::Error;
+use std::io::{stdin, stdout, Write};
+use midir::{MidiInput, MidiInputConnection};
 use rust_vst_synth::envelope::Envelope;
 use rust_vst_synth::filter::{Filter, FilterParameters, FilterSlope, FilterType};
 use rust_vst_synth::oscillator::OscillatorConfig;
 use rust_vst_synth::synthesizer::{Synthesizer, SynthesizerConfig};
 use rust_vst_synth::voice_configuration::Waveform;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let sample_rate = 44100.0;
-    // Create the envelope configuration
-    let envelope = Envelope::new(
-        1.5,     // attack time in seconds
-        1.0,     // decay time
-        0.6,     // sustain level (amplitude)
-        2.0,     // release time
-        sample_rate  // initial sample rate
-    );
+fn midi_note_to_freq(note: u8) -> f32 {
+    440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0)
+}
 
-    // Wrap it in Arc<Mutex>
+fn main() -> Result<(), Box<dyn Error>> {
+    let sample_rate = 44100.0;
+    let envelope = Envelope::new(
+        0.1,     // faster attack for better response
+        0.1,     // shorter decay
+        0.7,     // sustain level
+        0.5,     // shorter release
+        sample_rate
+    );
     let envelope = Arc::new(Mutex::new(envelope));
 
     let filter_config = FilterParameters {
         filter_type: FilterType::LowPass,
         slope: FilterSlope::Slope24dB,
-        cutoff_frequency: 500.0,  // 2kHz initial cutoff
-        resonance_amount: 0.8,  // Moderate resonance
+        cutoff_frequency: 500.0,
+        resonance_amount: 0.8,
         modulation_amount: 0.6,
     };
 
-
-    // Create oscillator configurations
     let oscillator_configs = vec![
         OscillatorConfig {
             waveform: Waveform::SQUARE,
             detune_semitones: 0.0,
             volume: 1.0,
         },
-        OscillatorConfig {
-            waveform: Waveform::SAW,
-            detune_semitones: 7.0,
-            volume: 0.6,
-        },
-        OscillatorConfig {
-            waveform: Waveform::SQUARE,
-            detune_semitones: -12.0,
-            volume: 0.5,
-        },
         // OscillatorConfig {
-        //     waveform: Waveform::RANDOM,   // Random oscillator for texture
-        //     detune_semitones: 19.0,      // One octave down
+        //     waveform: Waveform::SAW,
+        //     detune_semitones: 7.0,
+        //     volume: 0.6,
+        // },
+        // OscillatorConfig {
+        //     waveform: Waveform::SQUARE,
+        //     detune_semitones: -12.0,
         //     volume: 0.5,
         // },
-        OscillatorConfig {
-            waveform: Waveform::WHITE_NOISE,   // Random oscillator for texture
-            detune_semitones: 0.0,      // One octave down
-            volume: 0.2,
-        }
-
+        // OscillatorConfig {
+        //     waveform: Waveform::WHITE_NOISE,
+        //     detune_semitones: 0.0,
+        //     volume: 0.2,
+        // }
     ];
 
     let filter = Filter::new(filter_config, sample_rate);
 
-    // Create synthesizer configuration
     let config = SynthesizerConfig {
         oscillator_configs,
         envelope: envelope.clone(),
@@ -72,33 +65,68 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Create and start the synthesizer
-    let mut synth = Synthesizer::new(config);
-    synth.start_audio()?;
+    let synth = Arc::new(Mutex::new(Synthesizer::new(config)));
+    synth.lock().unwrap().start_audio()?;
 
-    // Play a test note (A4 = 440 Hz)
-    println!("Playing test note...");
-    synth.note_on(110.0);
-
-    // sleep(Duration::from_millis(500));
-
-    // synth.note_on(165.0);
-
-    // sleep(Duration::from_millis(500));
-
-    // synth.note_on(220.0);
+    // Initialize MIDI
+    let midi_in = MidiInput::new("rust-synth-input")?;
     
-    // Keep the note playing for 2 seconds
-    sleep(Duration::from_secs(2));
-    
-    // Release the note
-    synth.note_off(110.0);
-    
-    // Wait for release to complete
-    sleep(Duration::from_secs(20));
+    // Get available MIDI input ports
+    let ports = midi_in.ports();
+    let in_ports_len = ports.len();
 
-    // Keep the program running
-    println!("Press Ctrl+C to exit...");
-    loop {
-        sleep(Duration::from_secs(10));
+    // No MIDI inputs available
+    if in_ports_len == 0 {
+        println!("No MIDI input ports available");
+        return Ok(());
     }
+
+    println!("\nAvailable input ports:");
+    for (i, p) in ports.iter().enumerate() {
+        println!("{}: {}", i, midi_in.port_name(p)?);
+    }
+
+    print!("Please select input port: ");
+    stdout().flush()?;
+    let mut input = String::new();
+    stdin().read_line(&mut input)?;
+    let port_number = input.trim().parse::<usize>()?.min(in_ports_len - 1);
+
+    let synth_clone = synth.clone();
+    
+    // Create MIDI connection and handle incoming messages
+    let _conn = midi_in.connect(
+        &ports[port_number],
+        "midi-read",
+        move |_stamp, message, _| {
+            let command = message[0] & 0xF0;
+            let note = message[1];
+            let velocity = message[2];
+
+            match command {
+                0x90 if velocity > 0 => {
+                    // Note On
+                    let freq = midi_note_to_freq(note);
+                    if let Ok(mut synth) = synth_clone.lock() {
+                        synth.note_on(freq);
+                    }
+                },
+                0x80 | 0x90 => {
+                    // Note Off (0x80 or 0x90 with velocity 0)
+                    let freq = midi_note_to_freq(note);
+                    if let Ok(mut synth) = synth_clone.lock() {
+                        synth.note_off(freq);
+                    }
+                },
+                _ => (),
+            }
+        },
+        (),
+    )?;
+
+    println!("\nReading MIDI input... Press Enter to exit.");
+    input.clear();
+    stdin().read_line(&mut input)?;
+
+    Ok(())
 }

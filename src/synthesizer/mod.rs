@@ -1,9 +1,9 @@
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use std::sync::{Arc, Mutex};
 use crate::envelope::Envelope;
-use crate::filter::{Filter, FilterParameters};
+use crate::filter::Filter;
 use crate::oscillator::OscillatorConfig;
 use crate::voice::Voice;
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use std::sync::{Arc, Mutex};
 
 pub struct Synthesizer {
     shared_state: Arc<Mutex<SharedState>>,
@@ -13,7 +13,7 @@ pub struct Synthesizer {
 
 struct SharedState {
     voices: Vec<Voice>,
-    sample_rate: f64,
+    sample_rate: f32,
 }
 
 
@@ -46,7 +46,7 @@ impl Synthesizer {
 
         {
             let mut state = self.shared_state.lock().unwrap();
-            state.sample_rate = config.sample_rate().0 as f64;
+            state.sample_rate = config.sample_rate().0 as f32;
         }
 
         let shared_state = self.shared_state.clone();
@@ -77,16 +77,16 @@ impl Synthesizer {
         for sample in buffer.iter_mut() {
             let mixed_sample = state.voices.iter_mut()
                 .map(|voice| voice.next_sample())
-                .sum::<f64>();
+                .sum::<f32>();
 
-            let num_voices = state.voices.len().max(1) as f64;
+            let num_voices = state.voices.len().max(1) as f32;
             *sample = (mixed_sample / num_voices) as f32;
         }
 
         state.voices.retain(|voice| voice.is_active());
     }
 
-    pub fn note_on(&mut self, frequency: f64) {
+    pub fn note_on(&mut self, frequency: f32) {
         let mut state = self.shared_state.lock().unwrap();
         if let Some(voice) = state.voices.iter_mut().find(|v| !v.is_active()) {
             voice.trigger_note(frequency);
@@ -104,7 +104,7 @@ impl Synthesizer {
         }
     }
 
-    pub fn note_off(&mut self, frequency: f64) {
+    pub fn note_off(&mut self, frequency: f32) {
         let mut state = self.shared_state.lock().unwrap();
         if let Some(voice) = state.voices.iter_mut().find(|v| v.is_active()) {
             voice.release_note();

@@ -1,18 +1,18 @@
 use std::sync::{atomic::Ordering, Arc};
 use std::time::Instant;
-use atomic_float::AtomicF64;
+use atomic_float::AtomicF32;
 use crate::filter::ModulationSource;
 
 #[derive(Clone)]
 pub struct Envelope {
-    pub attack_time: f64,
-    pub decay_time: f64,
-    pub sustain_level: f64,
-    pub release_time: f64,
-    current_value: Arc<AtomicF64>,
+    pub attack_time: f32,
+    pub decay_time: f32,
+    pub sustain_level: f32,
+    pub release_time: f32,
+    current_value: Arc<AtomicF32>,
     current_state: EnvelopeState,
-    rate: f64,
-    sample_rate: f64,
+    rate: f32,
+    sample_rate: f32,
     release_start: Option<Instant>,
     attack_start: Option<Instant>,
     decay_start: Option<Instant>,
@@ -20,13 +20,13 @@ pub struct Envelope {
 }
 
 impl Envelope {
-    pub fn new(attack_time: f64, decay_time: f64, sustain_level: f64, release_time: f64, sample_rate: f64) -> Self {
+    pub fn new(attack_time: f32, decay_time: f32, sustain_level: f32, release_time: f32, sample_rate: f32) -> Self {
         Envelope {
             attack_time,
             decay_time,
             sustain_level,
             release_time,
-            current_value: Arc::new(AtomicF64::new(0.0)),
+            current_value: Arc::new(AtomicF32::new(0.0)),
             current_state: EnvelopeState::Idle,
             rate: 0.0,
             sample_rate,
@@ -37,7 +37,7 @@ impl Envelope {
         }
     }
 
-    pub fn update_sample_rate(&mut self, new_sample_rate: f64) {
+    pub fn update_sample_rate(&mut self, new_sample_rate: f32) {
         self.sample_rate = new_sample_rate;
 
         match self.current_state {
@@ -71,10 +71,10 @@ impl Envelope {
         self.sample_count = Option::Some(0);
         self.current_state = EnvelopeState::Attack;
         let samples_for_attack = (self.attack_time * self.sample_rate).ceil() as u32;
-        self.current_value = Arc::new(AtomicF64::new(0.000));
+        // self.current_value = Arc::new(AtomicF32::new(0.000));
 
         // Calculate rate to reach 1.0 over exact number of samples
-        self.rate = (1.0 - self.current_value.load(Ordering::Relaxed)) / samples_for_attack as f64;
+        self.rate = (1.0 - self.current_value.load(Ordering::Relaxed)) / samples_for_attack as f32;
 
         self.attack_start = Some(Instant::now());
         println!("Attack started:");
@@ -89,7 +89,7 @@ impl Envelope {
             let samples_for_release = (self.release_time * self.sample_rate).ceil() as u32;
 
             // Calculate rate to reach 0.0 over exact number of samples
-            self.rate = -self.current_value.load(Ordering::Relaxed) / samples_for_release as f64;
+            self.rate = -self.current_value.load(Ordering::Relaxed) / samples_for_release as f32;
 
             self.release_start = Some(Instant::now());
             println!("Release started:");
@@ -101,7 +101,7 @@ impl Envelope {
 
 
 
-    pub fn next_value(&mut self) -> f64 {
+    pub fn next_value(&mut self) -> f32 {
         match self.current_state {
             EnvelopeState::Idle => 0.0,
             EnvelopeState::Attack => {
@@ -120,7 +120,7 @@ impl Envelope {
                     self.current_state = EnvelopeState::Decay;
 
                     let samples_for_decay = (self.decay_time * self.sample_rate).ceil() as u32;
-                    self.rate = (self.sustain_level - new_value) / samples_for_decay as f64;
+                    self.rate = (self.sustain_level - new_value) / samples_for_decay as f32;
                     self.decay_start = Some(Instant::now());
 
                     println!("Decay started:");
@@ -174,7 +174,7 @@ enum EnvelopeState {
 }
 
 impl ModulationSource for Envelope {
-    fn next_value(&mut self) -> f64 {
+    fn next_value(&mut self) -> f32 {
         self.next_value()  // reuse existing next_value method
     }
 

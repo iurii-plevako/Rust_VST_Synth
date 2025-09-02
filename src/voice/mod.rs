@@ -9,9 +9,9 @@ pub struct Voice {
     envelope: Arc<Mutex<Envelope>>,
     filter: Filter,
     filter_envelope: Arc<Mutex<Envelope>>,
-    frequency: f64,
+    frequency: f32,
     is_note_on: bool,
-    sample_rate: f64,
+    sample_rate: f32,
 }
 
 // Manual Clone implementation for Voice
@@ -34,10 +34,10 @@ impl Clone for Voice {
 impl Voice {
 
     pub fn new(
-        sample_rate: f64,
+        sample_rate: f32,
         oscillator_configs: Vec<OscillatorConfig>,
         envelope: Arc<Mutex<Envelope>>,
-        base_frequency: f64,
+        base_frequency: f32,
         mut filter: Filter,
         filter_envelope: Arc<Mutex<Envelope>>,
     ) -> Self {
@@ -62,7 +62,7 @@ impl Voice {
         }
     }
 
-    pub fn update_sample_rate(&mut self, new_sample_rate: f64) {
+    pub fn update_sample_rate(&mut self, new_sample_rate: f32) {
         self.sample_rate = new_sample_rate;
         self.envelope.lock().unwrap().update_sample_rate(new_sample_rate);
         for osc in &mut self.oscillators {
@@ -79,7 +79,7 @@ impl Voice {
 
     }
 
-    pub fn trigger_note(&mut self, frequency: f64) {
+    pub fn trigger_note(&mut self, frequency: f32) {
         self.frequency = frequency;
         self.is_note_on = true;
         if let Ok(mut env) = self.envelope.lock() {
@@ -101,7 +101,7 @@ impl Voice {
 
     }
 
-    pub fn next_sample(&mut self) -> f64 {
+    pub fn next_sample(&mut self) -> f32 {
         let envelope_value = if let Ok(mut env) = self.envelope.lock() {
             env.next_value()
         } else {
@@ -110,7 +110,7 @@ impl Voice {
 
         let sample = self.oscillators.iter_mut()
             .map(|osc| osc.next_sample())
-            .sum::<f64>();
+            .sum::<f32>();
 
         let enveloped_sample = sample * envelope_value;
 

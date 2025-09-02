@@ -3047,6 +3047,7 @@ dependencies = [
  "atomic_float 1.1.0",
  "cpal",
  "dasp",
+ "midir",
  "nih_plug",
  "nih_plug_vizia",
 ]
