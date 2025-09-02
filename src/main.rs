@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use std::error::Error;
 use std::io::{stdin, stdout, Write};
 use midir::{MidiInput, MidiInputConnection};
-use rust_vst_synth::envelope::Envelope;
+use rust_vst_synth::envelope::{Envelope, EnvelopeConfig};
 use rust_vst_synth::filter::{Filter, FilterParameters, FilterSlope, FilterType};
 use rust_vst_synth::oscillator::OscillatorConfig;
 use rust_vst_synth::synthesizer::{Synthesizer, SynthesizerConfig};
@@ -14,19 +14,27 @@ fn midi_note_to_freq(note: u8) -> f32 {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let sample_rate = 44100.0;
-    let envelope = Envelope::new(
-        0.1,     // faster attack for better response
-        0.1,     // shorter decay
-        0.7,     // sustain level
-        0.5,     // shorter release
-        sample_rate
+
+    let envelope_config = EnvelopeConfig::new(
+        0.5,    // attack time
+        0.5,    // decay time
+        0.7,    // sustain level
+        3.0,    // release time
+        false,  // retrigger off - will continue from current value
     );
-    let envelope = Arc::new(Mutex::new(envelope));
+
+    let filter_envelope_config = EnvelopeConfig::new(
+        0.3,    // attack time
+        0.2,    // decay time
+        0.7,    // sustain level
+        3.0,    // release time
+        false,   // retrigger on - will start from beginning
+    );
 
     let filter_config = FilterParameters {
         filter_type: FilterType::LowPass,
         slope: FilterSlope::Slope24dB,
-        cutoff_frequency: 500.0,
+        cutoff_frequency: 2000.0,
         resonance_amount: 0.8,
         modulation_amount: 0.6,
     };
@@ -37,11 +45,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             detune_semitones: 0.0,
             volume: 1.0,
         },
-        // OscillatorConfig {
-        //     waveform: Waveform::SAW,
-        //     detune_semitones: 7.0,
-        //     volume: 0.6,
-        // },
+        OscillatorConfig {
+            waveform: Waveform::SAW,
+            detune_semitones: 7.0,
+            volume: 0.6,
+        },
         // OscillatorConfig {
         //     waveform: Waveform::SQUARE,
         //     detune_semitones: -12.0,
@@ -58,11 +66,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let config = SynthesizerConfig {
         oscillator_configs,
-        envelope: envelope.clone(),
+        envelope_config,
         filter,
-        filter_envelope: envelope.clone(),
+        filter_envelope_config,
         max_voices: 16,
+        sample_rate,
     };
+
 
     // Create and start the synthesizer
     let synth = Arc::new(Mutex::new(Synthesizer::new(config)));

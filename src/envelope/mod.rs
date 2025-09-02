@@ -1,164 +1,106 @@
-use std::sync::{atomic::Ordering, Arc};
-use std::time::Instant;
-use atomic_float::AtomicF32;
 use crate::filter::ModulationSource;
 
 #[derive(Clone)]
 pub struct Envelope {
-    pub attack_time: f32,
-    pub decay_time: f32,
-    pub sustain_level: f32,
-    pub release_time: f32,
-    current_value: Arc<AtomicF32>,
+    config: EnvelopeConfig,
+    current_value: f32,
     current_state: EnvelopeState,
-    rate: f32,
     sample_rate: f32,
-    release_start: Option<Instant>,
-    attack_start: Option<Instant>,
-    decay_start: Option<Instant>,
-    sample_count: Option<u32>,
+    attack_increment: f32,
+    decay_increment: f32,
+    release_increment: f32,
 }
 
 impl Envelope {
-    pub fn new(attack_time: f32, decay_time: f32, sustain_level: f32, release_time: f32, sample_rate: f32) -> Self {
-        Envelope {
-            attack_time,
-            decay_time,
-            sustain_level,
-            release_time,
-            current_value: Arc::new(AtomicF32::new(0.0)),
+    pub fn new(config: EnvelopeConfig, sample_rate: f32) -> Self {
+        let attack_increment = 1.0 / (config.attack_time * sample_rate);
+        let decay_increment = (1.0 - config.sustain_level) / (config.decay_time * sample_rate);
+        let release_increment = config.sustain_level / (config.release_time * sample_rate);
+
+        Self {
+            config,
+            current_value: 0.0,
             current_state: EnvelopeState::Idle,
-            rate: 0.0,
             sample_rate,
-            release_start: None,
-            attack_start: None,
-            decay_start: None,
-            sample_count: None,
+            attack_increment,
+            decay_increment,
+            release_increment,
         }
+    }
+
+    pub fn current_value(&self) -> f32 {
+        self.current_value
+    }
+
+    pub fn trigger(&mut self, other_value: Option<f32>) {
+        if !self.config.retrigger && other_value.is_some() {
+            self.current_value = other_value.unwrap();
+            self.attack_increment = (1.0 - self.current_value) / (self.config.attack_time * self.sample_rate);
+        } else {
+            self.current_value = 0.0;
+        }
+        self.current_state = EnvelopeState::Attack;
     }
 
     pub fn update_sample_rate(&mut self, new_sample_rate: f32) {
         self.sample_rate = new_sample_rate;
-
-        match self.current_state {
-            EnvelopeState::Attack => {
-                let samples_for_attack = self.attack_time * new_sample_rate;
-                self.rate = (1.0 - self.current_value.load(Ordering::Relaxed)) / samples_for_attack;
-            }
-            EnvelopeState::Decay => {
-                let samples_for_decay = self.decay_time * new_sample_rate;
-                self.rate = (self.sustain_level - self.current_value.load(Ordering::Relaxed)) / samples_for_decay;
-            }
-            EnvelopeState::Release => {
-                let samples_for_release = self.release_time * new_sample_rate;
-                self.rate = -self.current_value.load(Ordering::Relaxed) / samples_for_release;
-            }
-            _ => {}
-        }
-
+        self.attack_increment = 1.0 / (self.config.attack_time * new_sample_rate);
+        self.decay_increment = (1.0 - self.config.sustain_level) / (self.config.decay_time * new_sample_rate);
+        self.release_increment = self.config.sustain_level / (self.config.release_time * new_sample_rate);
     }
 
     pub fn is_active(&self) -> bool {
-        // Envelope is active until it fully completes the release phase
         match self.current_state {
             EnvelopeState::Idle => false,
-            EnvelopeState::Release => self.current_value.load(Ordering::Relaxed) > 0.00001, // Consider envelope done when nearly silent
+            EnvelopeState::Release => self.current_value > 0.00001, // Consider envelope done when nearly silent
             _ => true
         }
-    }
-
-    pub fn trigger(&mut self) {
-        self.sample_count = Option::Some(0);
-        self.current_state = EnvelopeState::Attack;
-        let samples_for_attack = (self.attack_time * self.sample_rate).ceil() as u32;
-        // self.current_value = Arc::new(AtomicF32::new(0.000));
-
-        // Calculate rate to reach 1.0 over exact number of samples
-        self.rate = (1.0 - self.current_value.load(Ordering::Relaxed)) / samples_for_attack as f32;
-
-        self.attack_start = Some(Instant::now());
-        println!("Attack started:");
-        println!("- Initial value: {}", self.current_value.load(Ordering::Relaxed));
-        println!("- Samples to process: {}", samples_for_attack);
-        println!("- Rate (increase per sample): {}", self.rate);
     }
 
     pub fn release(&mut self) {
         if self.current_state != EnvelopeState::Idle {
             self.current_state = EnvelopeState::Release;
-            let samples_for_release = (self.release_time * self.sample_rate).ceil() as u32;
-
-            // Calculate rate to reach 0.0 over exact number of samples
-            self.rate = -self.current_value.load(Ordering::Relaxed) / samples_for_release as f32;
-
-            self.release_start = Some(Instant::now());
-            println!("Release started:");
-            println!("- From value: {}", self.current_value.load(Ordering::Relaxed));
-            println!("- Samples to process: {}", samples_for_release);
-            println!("- Rate (change per sample): {}", self.rate);
         }
     }
-
-
 
     pub fn next_value(&mut self) -> f32 {
         match self.current_state {
             EnvelopeState::Idle => 0.0,
+
             EnvelopeState::Attack => {
-                let new_value = (self.current_value.load(Ordering::Relaxed) + self.rate)
-                    .clamp(0.0, 1.0);  // Clamp to valid range
-                self.current_value.store(new_value, Ordering::Relaxed);
+                self.current_value = (self.current_value + self.attack_increment)
+                    .clamp(0.0, 1.0);
 
-                if let Some(count) = self.sample_count.as_mut() {
-                    *count += 1;
-                }
-
-                // Transition based on value, not time
-                if new_value >= 1.0 {
-                    println!("Attack completed after {} samples", self.sample_count.unwrap());
-                    self.attack_start = None;
+                if self.current_value >= 1.0 {
                     self.current_state = EnvelopeState::Decay;
-
-                    let samples_for_decay = (self.decay_time * self.sample_rate).ceil() as u32;
-                    self.rate = (self.sustain_level - new_value) / samples_for_decay as f32;
-                    self.decay_start = Some(Instant::now());
-
-                    println!("Decay started:");
-                    println!("- From value: {}", new_value);
-                    println!("- Target sustain: {}", self.sustain_level);
-                    println!("- Samples to process: {}", samples_for_decay);
-                    println!("- Rate (change per sample): {}", self.rate);
                 }
-                new_value
+                self.current_value
             }
+
             EnvelopeState::Decay => {
-                let new_value = (self.current_value.load(Ordering::Relaxed) + self.rate)
-                    .clamp(self.sustain_level, 1.0);
-                self.current_value.store(new_value, Ordering::Relaxed);
+                self.current_value = (self.current_value - self.decay_increment)
+                    .clamp(self.config.sustain_level, 1.0);
 
-                // Transition based on value
-                if new_value <= self.sustain_level {
-                    println!("Decay completed");
-                    self.decay_start = None;
+                if self.current_value <= self.config.sustain_level {
                     self.current_state = EnvelopeState::Sustain;
-                    println!("Sustain reached at level: {}", new_value);
                 }
-                new_value
+                self.current_value
             }
-            EnvelopeState::Sustain => self.sustain_level,
-            EnvelopeState::Release => {
-                let new_value = (self.current_value.load(Ordering::Relaxed) + self.rate)
-                    .clamp(0.0, 1.0);  // Allow going down to silence
-                self.current_value.store(new_value, Ordering::Relaxed);
 
-                // Transition based on value
-                if new_value <= 0.001 {  // Small threshold for silence
-                    println!("Release completed at value {:.4}", new_value);
-                    self.release_start = None;
+            EnvelopeState::Sustain => {
+                self.current_value = self.config.sustain_level;
+                self.current_value
+            }
+
+            EnvelopeState::Release => {
+                self.current_value = (self.current_value - self.release_increment)
+                    .clamp(0.0, 1.0);
+
+                if self.current_value <= 0.001 {
                     self.current_state = EnvelopeState::Idle;
-                    self.current_value.store(0.0, Ordering::Relaxed);
+                    self.current_value = 0.0;
                 }
-                new_value
+                self.current_value
             }
         }
     }
@@ -175,14 +117,35 @@ enum EnvelopeState {
 
 impl ModulationSource for Envelope {
     fn next_value(&mut self) -> f32 {
-        self.next_value()  // reuse existing next_value method
+        self.next_value()
     }
 
     fn is_active(&self) -> bool {
-        self.is_active()   // reuse existing is_active method
+        self.is_active()
     }
 
     fn reset(&mut self) {
-        self.trigger();    // reuse trigger as reset
+        self.trigger(None);
+    }
+}
+
+#[derive(Clone)]
+pub struct EnvelopeConfig {
+    pub attack_time: f32,
+    pub decay_time: f32,
+    pub sustain_level: f32,
+    pub release_time: f32,
+    pub retrigger: bool,
+}
+
+impl EnvelopeConfig {
+    pub fn new(attack_time: f32, decay_time: f32, sustain_level: f32, release_time: f32, retrigger: bool) -> Self {
+        Self {
+            attack_time,
+            decay_time,
+            sustain_level,
+            release_time,
+            retrigger,
+        }
     }
 }
